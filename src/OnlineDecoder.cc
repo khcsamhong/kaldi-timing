@@ -93,23 +93,37 @@ void OnlineDecoder::GetRecognitionResult(DecodedData &input, RecognitionResult *
 
 	  std::ostringstream outss;
 
-	  float scale = wave_length / (input.timing[input.words.size()-1] + input.lengths[input.words.size()-1]);
-	  for (size_t i = 0; i < input.words.size(); i++) {
-		if (i) {
-		  outss << " ";
-		}
-		std::string s = word_syms_->Find(input.words[i]);
-		if (s == "") {
-		  KALDI_WARN << "Word-id " << input.words[i] <<" not in symbol table.";
-		} else {
-			outss << s;
-			outss << "(";
-			outss <<input.timing[i]*scale<<", "<<(input.timing[i]+input.lengths[i])*scale;
-			outss << ")";
-		}
+	  if (input.timing.size()!=input.words.size()) {
+		  for (size_t i = 0; i < input.words.size(); i++) {
+			if (i) {
+			  outss << " ";
+			}
+			std::string s = word_syms_->Find(input.words[i]);
+			if (s == "") {
+			  KALDI_WARN << "Word-id " << input.words[i] <<" not in symbol table.";
+			} else {
+				outss << s;
+				outss << " ";
+			}
+		  }
+	  } else {
+		  float scale = wave_length / (input.timing[input.words.size()-1] + input.lengths[input.words.size()-1]);
+		  for (size_t i = 0; i < input.words.size(); i++) {
+			if (i) {
+			  outss << " ";
+			}
+			std::string s = word_syms_->Find(input.words[i]);
+			if (s == "") {
+			  KALDI_WARN << "Word-id " << input.words[i] <<" not in symbol table.";
+			} else {
+				outss << s;
+				outss << "(";
+				outss <<input.timing[i]*scale<<", "<<(input.timing[i]+input.lengths[i])*scale;
+				outss << ")";
+			}
+		  }
 	  }
 
-	  outss<<wave_length;
 	  output->text = outss.str();
 }
 
@@ -297,8 +311,13 @@ int32 OnlineDecoder::Decode(bool end_of_utterance, int bestCount, std::vector<De
 		  for (int32 k = 0; k < resultsNumber; k++) {
 			kaldi::Lattice &nbest_lat = nbest_lats[k];
 
+			kaldi::CompactLattice nbest_clat, aligned_clat;
+			fst::ConvertLattice(nbest_lat, &nbest_clat);
+			WordAlignLattice(nbest_clat, 0, &aligned_clat);
 			DecodedData decodeData;
-			GetLinearSymbolSequence(nbest_lat, &(decodeData.alignment), &(decodeData.words), &(decodeData.weight));
+
+			kaldi::CompactLatticeToWordAlignment(aligned_clat, &(decodeData.words), &(decodeData.timing), &(decodeData.lengths));
+//			GetLinearSymbolSequence(nbest_lat, &(decodeData.alignment), &(decodeData.words), &(decodeData.weight));
 			getWeightMeasures(nbest_lat, &(decodeData.weights));
 			result->push_back(decodeData);
 		  }
@@ -307,41 +326,16 @@ int32 OnlineDecoder::Decode(bool end_of_utterance, int bestCount, std::vector<De
 		kaldi::CompactLattice best_path_clat;
 		kaldi::CompactLattice aligned_clat;
 		kaldi::CompactLatticeShortestPath(clat, &best_path_clat);
-      	bool ok = WordAlignLattice(best_path_clat, 0, &aligned_clat);
+      	WordAlignLattice(best_path_clat, 0, &aligned_clat);
 
-		if (!ok) {
-			kaldi::Lattice best_path_lat;
-			fst::ConvertLattice(best_path_clat, &best_path_lat);
-			DecodedData decodeData;
-			GetLinearSymbolSequence(best_path_lat, &(decodeData.alignment), &(decodeData.words), &(decodeData.weight));
-			getWeightMeasures(best_path_lat, &(decodeData.weights));
-			result->push_back(decodeData);
-			resultsNumber = 1;
-		} else {
-			kaldi::Lattice best_path_lat;
-			DecodedData decodeData;
+		kaldi::Lattice best_path_lat;
+		DecodedData decodeData;
 
-		      if (!kaldi::CompactLatticeToWordAlignment(aligned_clat, &(decodeData.words), &(decodeData.timing), &(decodeData.lengths))) {
-		        KALDI_WARN << "Format conversion failed";
-		      } else {
-//		        KALDI_ASSERT(words.size() == times.size() &&
-//		                     words.size() == lengths.size());
-/*
-		        for (size_t i = 0; i < words.size(); i++) {
-		          if (words[i] == 0 && !print_silence)  // Don't output anything for <eps> links, which
-		            continue; // correspond to silence....
-		          ko.Stream() << key << " 1 " << (frame_shift * times[i]) << ' '
-		                      << (frame_shift * lengths[i]) << ' ' << words[i] <<std::endl;
-		        }
-*/
-		      }
-
-//			GetLinearSymbolSequence(best_path_lat, &(decodeData.alignment), &(decodeData.words), &(decodeData.weight));
-			fst::ConvertLattice(aligned_clat, &best_path_lat);
-			getWeightMeasures(best_path_lat, &(decodeData.weights));
-			result->push_back(decodeData);
-			resultsNumber = 1;			
-		}
+		kaldi::CompactLatticeToWordAlignment(aligned_clat, &(decodeData.words), &(decodeData.timing), &(decodeData.lengths));
+		fst::ConvertLattice(aligned_clat, &best_path_lat);
+		getWeightMeasures(best_path_lat, &(decodeData.weights));
+		result->push_back(decodeData);
+		resultsNumber = 1;			
 	}
 
 	return resultsNumber;
